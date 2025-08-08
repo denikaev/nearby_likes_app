@@ -1,0 +1,6 @@
+body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial; margin: 12px; }
+#app { max-width: 520px; margin: 0 auto; }
+.controls { display: flex; gap: 8px; flex-wrap: wrap; margin: 8px 0; }
+.user-card, .lb-item { border: 1px solid #ddd; border-radius: 8px; padding: 8px; margin: 8px 0; }
+button { padding: 8px 12px; border-radius: 8px; border: 1px solid #ccc; }
+small { color: #666; }

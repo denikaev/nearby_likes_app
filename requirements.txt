@@ -1,0 +1,11 @@
+fastapi
+uvicorn
+python-telegram-bot==21.6
+pydantic
+sqlalchemy
+aiosqlite
+httpx
+jinja2
+python-dotenv
+geohash2
+psycopg2-binary
