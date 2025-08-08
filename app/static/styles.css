@@ -1,6 +1,29 @@
-body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial; margin: 12px; }
-#app { max-width: 520px; margin: 0 auto; }
-.controls { display: flex; gap: 8px; flex-wrap: wrap; margin: 8px 0; }
-.user-card, .lb-item { border: 1px solid #ddd; border-radius: 8px; padding: 8px; margin: 8px 0; }
-button { padding: 8px 12px; border-radius: 8px; border: 1px solid #ccc; }
-small { color: #666; }
+* { box-sizing: border-box; }
+body {
+  margin: 0; padding: 16px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+  background: #111; color: #eee;
+}
+h1 { margin: 0 0 12px; font-size: 20px; }
+.wrap { max-width: 720px; margin: 0 auto; }
+.card {
+  background: #1b1b1b; border: 1px solid #2a2a2a; border-radius: 10px;
+  padding: 12px; margin: 10px 0;
+}
+button {
+  appearance: none;
+  padding: 10px 14px; margin: 6px 6px 0 0; border-radius: 8px;
+  border: 1px solid #3a3a3a; background: #2b2b2b; color: #fff;
+}
+button:active { transform: translateY(1px); }
+#status { font-size: 14px; color: #bbb; }
+.row {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 8px 0; border-top: 1px solid #2a2a2a;
+}
+.row:first-child { border-top: 0; }
+.user { display: flex; align-items: center; gap: 10px; }
+.user img { width: 36px; height: 36px; border-radius: 50%; }
+.muted { color: #9aa; font-size: 12px; }
+.rank { width: 40px; text-align: center; color: #ccc; }
+.score { font-weight: bold; }

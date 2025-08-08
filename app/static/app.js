@@ -1,131 +1,161 @@
-const tg = window.Telegram.WebApp;
-tg.expand();
+// Простые утилиты
+const tg = window.Telegram ? window.Telegram.WebApp : null;
+const statusEl = () => document.getElementById('status');
+const setStatus = (msg) => { statusEl().textContent = msg; };
 
-let state = {
-  userId: null,
-  me: null
-};
+let USER_ID = null;      // наш внутренний id (из /api/register)
+let LAST_COORDS = null;  // { lat, lon }
 
-async function api(path, method="GET", body=null, extraHeaders={}) {
-  const headers = {"Content-Type":"application/json", ...extraHeaders};
-  if (state.userId) headers["X-User-Id"] = String(state.userId);
-  const res = await fetch(path, {
-    method, headers,
-    body: body ? JSON.stringify(body) : null
+function api(url, opts={}) {
+  return fetch(url, {
+    method: opts.method || 'GET',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(USER_ID ? {'X-User-Id': String(USER_ID)} : {})
+    },
+    body: opts.body ? JSON.stringify(opts.body) : undefined
+  }).then(async r => {
+    if (!r.ok) {
+      const t = await r.text().catch(()=>r.statusText);
+      throw new Error(t);
+    }
+    return r.json().catch(()=> ({}));
   });
-  if (!res.ok) {
-    const txt = await res.text();
-    throw new Error(txt || res.statusText);
-  }
-  return res.json();
 }
 
-async function register() {
-  const initData = tg.initData || "";
-  const me = await api("/api/register", "POST", {init_data: initData});
-  state.userId = me.id;
-  state.me = me;
-  document.getElementById("me").innerHTML = `
-    <div class="user-card">
-      <div><b>Вы:</b> ${me.first_name ?? ""} ${me.last_name ?? ""} @${me.username ?? ""}</div>
-      <div>Лайков получено: <b>${me.likes_received}</b></div>
-    </div>`;
-}
-
-async function heartbeat() {
-  const status = document.getElementById("status");
-  status.textContent = "Обновляем геопозицию...";
-  if (!navigator.geolocation) {
-    status.textContent = "Геолокация не поддерживается";
-    return;
-  }
-  navigator.geolocation.getCurrentPosition(async pos => {
-    const {latitude, longitude} = pos.coords;
-    await api("/api/heartbeat", "POST", {lat: latitude, lon: longitude});
-    status.textContent = `Геопозиция обновлена: ${latitude.toFixed(5)}, ${longitude.toFixed(5)}`;
-  }, err => {
-    status.textContent = "Не удалось получить геопозицию: " + err.message;
-  }, {enableHighAccuracy:true, maximumAge:10000, timeout:10000});
-}
-
-async function loadNearby() {
-  const status = document.getElementById("status");
-  status.textContent = "Ищем кто рядом...";
-  if (!navigator.geolocation) {
-    status.textContent = "Геолокация не поддерживается";
-    return;
-  }
-  navigator.geolocation.getCurrentPosition(async pos => {
-    const {latitude, longitude} = pos.coords;
-    const list = await api(`/api/nearby?lat=${latitude}&lon=${longitude}`);
-    status.textContent = list.length ? `Найдено рядом: ${list.length}` : "Рядом никого";
-    const box = document.getElementById("nearby");
-    document.getElementById("leaderboard").style.display = "none";
-    box.innerHTML = list.map(u => `
-      <div class="user-card">
-        <div><b>${u.first_name ?? ""} ${u.last_name ?? ""}</b> @${u.username ?? ""}</div>
-        <div>Дистанция: ${u.distance_m} м, Лайков: ${u.likes_received}</div>
-        <button onclick="likeUser(${u.id})">Лайкнуть</button>
-        <button onclick="openProfile(${u.id})">Профиль</button>
-      </div>
-    `).join("");
-  }, err => {
-    status.textContent = "Не удалось получить геопозицию: " + err.message;
-  }, {enableHighAccuracy:true, maximumAge:10000, timeout:10000});
-}
-
-async function likeUser(targetId) {
+// 1) Регистрация через initData
+async function doRegister() {
   try {
-    // используем последнюю геопозицию со стороны сервера (мы всё равно шлём lat/lon в теле для совместимости)
-    const res = await api("/api/like", "POST", {target_user_id: targetId, lat: 0, lon: 0});
-    alert(res.message);
+    if (!tg) throw new Error('Telegram WebApp SDK не доступен');
+    const initData = tg.initData || '';
+    if (!initData) throw new Error('Откройте мини-апп из кнопки бота');
+
+    setStatus('Регистрируемся…');
+    const data = await api('/api/register', {
+      method: 'POST',
+      body: { init_data: initData }
+    });
+    USER_ID = data.id;
+    setStatus(`OK, вы: #${USER_ID} (${data.username || data.first_name || 'без имени'})`);
   } catch (e) {
-    alert(e.message);
+    setStatus('Ошибка регистрации: ' + e.message);
   }
 }
 
-async function openProfile(userId) {
+// 2) Запрос геолокации и отправка heartbeat
+async function doHeartbeat() {
   try {
-    const data = await api(`/api/profile/${userId}`);
-    alert(
-      `Профиль @${data.user.username}\n` +
-      `Лайков: ${data.user.likes_received}\n` +
-      `Вы лайкали: ${data.you_liked_them ? "да" : "нет"}\n` +
-      `Он/она лайкал(а) вас: ${data.they_liked_you ? "да" : "нет"}`
+    if (!USER_ID) throw new Error('Сначала регистрация');
+    setStatus('Получаем геолокацию…');
+
+    const coords = await getLocation();
+    LAST_COORDS = coords;
+
+    const me = await api('/api/heartbeat', {
+      method: 'POST',
+      body: { lat: coords.lat, lon: coords.lon }
+    });
+    setStatus(`Геопозиция обновлена. Лайков: ${me.likes_received}`);
+  } catch (e) {
+    setStatus('Ошибка геопозиции/heartbeat: ' + e.message);
+  }
+}
+
+function getLocation() {
+  return new Promise((resolve, reject) => {
+    if (!navigator.geolocation) return reject(new Error('Geolocation не поддерживается'));
+    navigator.geolocation.getCurrentPosition(
+      pos => resolve({ lat: pos.coords.latitude, lon: pos.coords.longitude }),
+      err => reject(new Error('Нет доступа к геолокации: ' + err.message)),
+      { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
     );
+  });
+}
+
+// 3) Кто рядом
+async function loadNearby() {
+  try {
+    if (!USER_ID) throw new Error('Сначала регистрация');
+    if (!LAST_COORDS) await doHeartbeat();
+
+    setStatus('Ищем кто рядом…');
+    const q = new URLSearchParams({ lat: LAST_COORDS.lat, lon: LAST_COORDS.lon }).toString();
+    const list = await api('/api/nearby?' + q);
+
+    const box = document.getElementById('nearby');
+    box.innerHTML = '';
+    if (!list.length) {
+      box.innerHTML = '<div class="muted">Пока никого рядом</div>';
+      setStatus('Никого в радиусе.');
+      return;
+    }
+    list.forEach(u => {
+      const el = document.createElement('div');
+      el.className = 'row';
+      el.innerHTML = `
+        <div class="user">
+          <img src="${u.photo_url || ''}" onerror="this.style.display='none'"/>
+          <div>
+            <div><b>@${u.username || (u.first_name || 'user')}</b></div>
+            <div class="muted">${u.distance_m} м · лайков: ${u.likes_received}</div>
+          </div>
+        </div>
+        <div><button class="like" data-id="${u.id}">Лайк</button></div>`;
+      box.appendChild(el);
+    });
+
+    // навесим обработчики лайка
+    box.querySelectorAll('button.like').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const id = Number(btn.dataset.id);
+        try {
+          const res = await api('/api/like', { method: 'POST', body: { target_user_id: id } });
+          setStatus(res.message || 'Лайк!');
+          await loadNearby(); // обновим список
+        } catch (e) {
+          setStatus('Ошибка лайка: ' + e.message);
+        }
+      });
+    });
+
+    setStatus('Готово.');
   } catch (e) {
-    alert(e.message);
+    setStatus('Ошибка nearby: ' + e.message);
   }
 }
 
-async function showLeaderboard() {
+// 4) Лидерборд
+async function loadLeaderboard() {
   try {
-    const lb = await api("/api/leaderboard");
-    const box = document.getElementById("leaderboard");
-    document.getElementById("nearby").innerHTML = "";
-    box.style.display = "block";
-    box.innerHTML = lb.map((item, idx) => `
-      <div class="lb-item">
-        <div><b>#${idx+1}</b> ${item.user.first_name ?? ""} ${item.user.last_name ?? ""} @${item.user.username ?? ""}</div>
-        <div>Лайков: <b>${item.likes_received}</b></div>
-        <button onclick="openProfile(${item.user.id})">Профиль</button>
-      </div>
-    `).join("");
+    const list = await api('/api/leaderboard');
+    const box = document.getElementById('leaderboard');
+    box.innerHTML = '';
+    list.forEach((row, i) => {
+      const u = row.user;
+      const el = document.createElement('div');
+      el.className = 'row';
+      el.innerHTML = `
+        <div class="rank">#${i+1}</div>
+        <div class="user">
+          <img src="${u.photo_url || ''}" onerror="this.style.display='none'"/>
+          <div><b>@${u.username || (u.first_name || 'user')}</b></div>
+        </div>
+        <div class="score">${row.likes_received}</div>`;
+      box.appendChild(el);
+    });
   } catch (e) {
-    alert(e.message);
+    setStatus('Ошибка лидерборда: ' + e.message);
   }
 }
 
-document.getElementById("shareLoc").addEventListener("click", heartbeat);
-document.getElementById("refreshNearby").addEventListener("click", loadNearby);
-document.getElementById("showLb").addEventListener("click", showLeaderboard);
+// wire UI
+window.addEventListener('DOMContentLoaded', () => {
+  document.getElementById('btnRegister').addEventListener('click', doRegister);
+  document.getElementById('btnHeartbeat').addEventListener('click', doHeartbeat);
+  document.getElementById('btnNearby').addEventListener('click', loadNearby);
+  document.getElementById('btnLeaderboard').addEventListener('click', loadLeaderboard);
 
-(async function boot(){
-  try {
-    await register();
-    await heartbeat();
-    await loadNearby();
-  } catch (e) {
-    alert("Ошибка старта: " + e.message);
-  }
-})();
+  // Авто-инициализация Telegram темы
+  if (tg) tg.expand();
+  setStatus('Откройте из бота → нажмите "Регистрация".');
+});
