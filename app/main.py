@@ -18,6 +18,8 @@ from .utils import (
     haversine_m, encode_geohash, NEARBY_METERS,
     like_cooldown_deadline, geohash_cooldown_deadline
 )
+from dotenv import load_dotenv
+load_dotenv()
 
 # ---------------- DB & APP ----------------
 Base.metadata.create_all(bind=engine)
