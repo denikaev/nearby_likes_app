@@ -6,37 +6,14 @@ services:
     buildCommand: pip install -r requirements.txt
     startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
     envVars:
-      - key: WEBAPP_URL
-        value: https://nearby-likes-web.onrender.com/webapp   # обновишь после деплоя на реальный URL
-      - key: NEARBY_METERS
-        value: "50"
-      - key: LIKE_COOLDOWN_SECONDS
-        value: "300"
-      - key: GEOHASH_COOLDOWN_SECONDS
-        value: "900"
-      - key: TELEGRAM_BOT_TOKEN
-        sync: false   # зададим вручную в UI
-      - key: DATABASE_URL
-        fromDatabase:
-          name: nearby-likes-db
-          property: connectionString
-
-  - type: worker
-    name: nearby-likes-bot
-    env: python
-    plan: free
-    buildCommand: pip install -r requirements.txt
-    startCommand: python bot/bot.py
-    envVars:
+      - key: PUBLIC_BASE_URL          # см. шаг 3 — сюда поставишь публичный URL сервиса Render
+        value: https://nearby-likes-web.onrender.com
+      - key: WEBAPP_URL               # URL мини-аппа
+        value: https://nearby-likes-web.onrender.com/webapp
       - key: TELEGRAM_BOT_TOKEN
         sync: false
-      - key: WEBAPP_URL
-        value: https://nearby-likes-web.onrender.com/webapp
+      - key: TELEGRAM_WEBHOOK_SECRET  # любой длинный рандом, чтобы не светить токен в пути
+        sync: false
       - key: DATABASE_URL
         fromDatabase:
-          name: nearby-likes-db
-          property: connectionString
-
-databases:
-  - name: nearby-likes-db
-    plan: free
+          name: nearby-likes-
