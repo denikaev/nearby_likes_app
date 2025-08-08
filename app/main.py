@@ -6,6 +6,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
 from sqlalchemy import func, desc, and_
+from dotenv import load_dotenv
 
 from .db import Base, engine, SessionLocal
 from .models import User, LocationPing, Like
@@ -18,7 +19,8 @@ from .utils import (
     haversine_m, encode_geohash, NEARBY_METERS,
     like_cooldown_deadline, geohash_cooldown_deadline
 )
-from dotenv import load_dotenv
+
+# Подтягиваем локальный .env (на Render переменные берутся из Dashboard)
 load_dotenv()
 
 # ---------------- DB & APP ----------------
@@ -271,8 +273,7 @@ def profile(user_id: int, request: Request, db: Session = Depends(get_db)):
         ]
     )
 
-# ===================== Telegram bot via POLLING (free plan) =====================
-from threading import Thread
+# ===================== Telegram bot via POLLING (no threads) =====================
 from telegram import Update, KeyboardButton, ReplyKeyboardMarkup, WebAppInfo
 from telegram.ext import Application, CommandHandler, ContextTypes
 
@@ -282,7 +283,7 @@ WEBAPP_URL = os.getenv("WEBAPP_URL")  # https://<render>/webapp
 if not WEBAPP_URL:
     raise RuntimeError("WEBAPP_URL is not set")
 
-app.state.bot_thread = None
+app.state.tg_app = None  # Application из python-telegram-bot
 
 async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     kb = [[KeyboardButton(text="Открыть Nearby Likes", web_app=WebAppInfo(url=WEBAPP_URL))]]
@@ -292,26 +293,33 @@ async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=ReplyKeyboardMarkup(kb, resize_keyboard=True)
         )
 
-def _run_bot_polling(token: str):
-    application = Application.builder().token(token).build()
-    application.add_handler(CommandHandler("start", start_cmd))
-    application.run_polling(drop_pending_updates=True)
-
 @app.on_event("startup")
-async def _start_bot_thread():
+async def _start_bot():
     if not BOT_TOKEN:
         print("TELEGRAM_BOT_TOKEN is not set — бот не запустится (ок на dev).")
         return
-    if app.state.bot_thread and app.state.bot_thread.is_alive():
-        return
-    t = Thread(target=_run_bot_polling, args=(BOT_TOKEN,), daemon=True)
-    t.start()
-    app.state.bot_thread = t
-    print("Telegram bot started (polling).")
+    application = Application.builder().token(BOT_TOKEN).build()
+    application.add_handler(CommandHandler("start", start_cmd))
+
+    # Запускаем бота в текущем event loop FastAPI (без потоков)
+    await application.initialize()
+    await application.start()
+    # В PTB v20+ polling управляется через внутренний Updater
+    await application.updater.start_polling()
+
+    app.state.tg_app = application
+    print("Telegram bot started (polling) in FastAPI loop.")
 
 @app.on_event("shutdown")
-async def _stop_bot_thread():
-    # run_polling завершается вместе с процессом uvicorn
-    print("Shutting down web app; bot thread will exit with process.")
+async def _stop_bot():
+    application = app.state.tg_app
+    if application:
+        try:
+            await application.updater.stop()
+        except Exception:
+            pass
+        await application.stop()
+        await application.shutdown()
+        app.state.tg_app = None
+        print("Telegram bot stopped.")
 # ==============================================================================
-
